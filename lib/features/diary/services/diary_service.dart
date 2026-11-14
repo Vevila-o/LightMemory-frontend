@@ -280,7 +280,8 @@ class DiaryService {
         'audio',
         bytes,
         filename: audio.name,
-        contentType: MediaType('audio', 'webm'),
+        // 網頁版錄的是 webm，手機 App 錄的是 m4a（audio/mp4），跟著錄音檔走
+        contentType: MediaType.parse(audio.mimeType ?? 'audio/webm'),
       ),
     );
     final streamed = await request.send();

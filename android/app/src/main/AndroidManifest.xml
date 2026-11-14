@@ -3,6 +3,7 @@
          手機重新開機後重新排程要收開機廣播。不用精準鬧鐘，誤差幾分鐘可以接受 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="light_memory"
         android:name="${applicationName}"

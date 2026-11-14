@@ -7,6 +7,9 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+// path_provider_platform_interface 是 path_provider 的相依套件，測試裡換掉暫存資料夾
+// ignore: depend_on_referenced_packages
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:light_memory/features/diary/models/diary_model.dart';
 import 'package:light_memory/features/diary/pages/diary_chat_page.dart';
@@ -18,13 +21,16 @@ const _subtitle = 'AI 會陪你聊 4 段小對話，聊完會自動生成今天�
 class _FakeRecordPlatform extends RecordPlatform
     with MockPlatformInterfaceMixin {
   bool _recording = false;
+  bool permission = true;
+  String? lastPath;
+  RecordConfig? lastConfig;
 
   @override
   Future<void> create(String recorderId) async {}
 
   @override
   Future<bool> hasPermission(String recorderId, {bool request = true}) async =>
-      true;
+      permission;
 
   @override
   Future<void> start(
@@ -32,6 +38,8 @@ class _FakeRecordPlatform extends RecordPlatform
     RecordConfig config, {
     required String path,
   }) async {
+    lastPath = path;
+    lastConfig = config;
     _recording = true;
   }
 
@@ -122,14 +130,29 @@ Future<void> _pumpWhileRecording(WidgetTester tester) async {
   }
 }
 
+/// 假的手機暫存資料夾
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<String?> getTemporaryPath() async => '/fake/tmp';
+}
+
 void main() {
   late RecordPlatform original;
+  late PathProviderPlatform originalPaths;
+  late _FakeRecordPlatform recorder;
 
   setUp(() {
     original = RecordPlatform.instance;
-    RecordPlatform.instance = _FakeRecordPlatform();
+    originalPaths = PathProviderPlatform.instance;
+    recorder = _FakeRecordPlatform();
+    RecordPlatform.instance = recorder;
+    PathProviderPlatform.instance = _FakePathProvider();
   });
-  tearDown(() => RecordPlatform.instance = original);
+  tearDown(() {
+    RecordPlatform.instance = original;
+    PathProviderPlatform.instance = originalPaths;
+  });
 
   Future<void> pumpPage(WidgetTester tester, {DiaryModel? diary}) async {
     tester.view.physicalSize = const Size(390 * 3, 844 * 3);
@@ -340,5 +363,29 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.pause));
     await _pumpWhileRecording(tester);
+  });
+
+  testWidgets('手機 App 錄音：存到 App 的暫存資料夾，用 AAC（m4a）編碼', (tester) async {
+    await pumpPage(tester);
+
+    await tester.tap(find.byIcon(Icons.mic));
+    await _pumpWhileRecording(tester);
+
+    // 只給檔名會寫到 App 不能寫的根目錄，iOS 錄音直接失敗
+    expect(recorder.lastPath, '/fake/tmp/round_audio.m4a');
+    expect(recorder.lastConfig?.encoder, AudioEncoder.aacLc);
+    expect(_overlayOpacity(tester), 1);
+  });
+
+  testWidgets('手機 App 沒有麥克風權限：請長輩到手機設定開啟，不會叫他去開瀏覽器權限', (tester) async {
+    recorder.permission = false;
+    await pumpPage(tester);
+
+    await tester.tap(find.byIcon(Icons.mic));
+    await tester.pump();
+
+    expect(find.textContaining('請到手機的「設定」允許憶智防線使用麥克風'), findsOneWidget);
+    expect(find.textContaining('瀏覽器'), findsNothing);
+    expect(recorder.lastPath, isNull);
   });
 }

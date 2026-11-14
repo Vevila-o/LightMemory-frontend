@@ -1,3 +1,26 @@
+## 小會（修正：手機 App 已開麥克風權限，卻顯示瀏覽器權限沒開、不能錄音）— 2026/11/14
+
+### 問題
+- 使用者回報：手機已經開啟麥克風權限，按錄音卻顯示要開瀏覽器的權限，沒辦法錄音。
+- 原因：
+  1. 錄音按鈕只寫了網頁版的做法，錄音位置只給檔名 `round_audio.webm`。網頁版沒問題（錄在瀏覽器記憶體），手機 App 卻會寫到 App 不能寫的根目錄，錄音一開始就失敗。
+  2. 失敗時的訊息寫死「請確認瀏覽器麥克風權限」，手機上看起來就像權限沒開。
+  3. iOS `Info.plist` 沒有 `NSMicrophoneUsageDescription`、Android 沒有 `RECORD_AUDIO` 權限，原生 App 本來就不能用麥克風。
+
+### 修正
+- `record_button.dart`
+  - 手機 App 錄到 App 的暫存資料夾（`path_provider` 的 `getTemporaryDirectory()`）`round_audio.m4a`，用 AAC 編碼；網頁版維持 webm（Opus）。
+  - 錯誤訊息分平台：手機版改成「請到手機的『設定』允許憶智防線使用麥克風」，網頁版維持原本說明。
+- `diary_service.dart`：上傳錄音的 Content-Type 跟著錄音檔（網頁 `audio/webm`、手機 `audio/mp4`），後端白名單本來就收 m4a。
+- `ios/Runner/Info.plist` 加 `NSMicrophoneUsageDescription`；`AndroidManifest.xml` 加 `RECORD_AUDIO`。
+- 錄音一樣會存到雲端：暫存檔只在錄音中使用，按完成後上傳到後端，由後端存到 Firebase，跟網頁版相同。
+
+### 測試
+- `diary_chat_page_test.dart` 新增：手機 App 錄音路徑是暫存資料夾的 m4a、編碼是 AAC；沒有權限時顯示手機設定的說明、不提瀏覽器。
+- `dashboard_diary_a11y_test.dart` 補假的暫存資料夾。
+- 全部測試只剩料理準備那 2 個原本就失敗的測試。
+- 還沒在實機上測。
+
 ## 小會（修正：日記對話頁捲動對話氣泡時照片沒有縮小）— 2026/11/14
 
 ### 問題

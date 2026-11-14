@@ -70,5 +70,7 @@
 	<string>需要讀取相簿，讓您選擇會員頭像和聲影日記的照片</string>
 	<key>NSCameraUsageDescription</key>
 	<string>需要使用相機，讓您拍攝會員頭像和聲影日記的照片</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要使用麥克風，讓您錄下聲影日記的內容</string>
 </dict>
 </plist>

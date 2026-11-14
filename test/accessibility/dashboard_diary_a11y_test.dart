@@ -24,6 +24,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:intl/date_symbol_data_local.dart';
+// ignore: depend_on_referenced_packages
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -446,6 +448,12 @@ class _FakeImagePicker extends ImagePickerPlatform
   }) async => XFile(path);
 }
 
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<String?> getTemporaryPath() async => Directory.systemTemp.path;
+}
+
 class _Env {
   final _Backend backend = _Backend();
   final List<String> unexpectedErrors = [];
@@ -471,6 +479,8 @@ void _scenarioTest(
     _setSurface(tester);
     SharedPreferences.setMockInitialValues({'access_token': 'test'});
     _stubPlatformChannels();
+    // 手機 App 錄音要先拿到暫存資料夾
+    PathProviderPlatform.instance = _FakePathProvider();
     VisibilityDetectorController.instance.updateInterval = Duration.zero;
     AppSettings.fontSizeLevel.value = 2;
     AppSettings.isDarkMode.value = false;
