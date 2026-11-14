@@ -12,7 +12,18 @@ enum QuestionPhase { locked, interactive, resolved }
 
 class MarketSortGameController extends ChangeNotifier {
   MarketSortGameController({Random? random}) : _random = random ?? Random() {
-    _plan = buildMarketSort28QuestionPlan(_random);
+    _setPlan(buildMarketSort28QuestionPlan(_random));
+    _pickItemForCurrentQuestion();
+  }
+
+  final Random _random;
+
+  /// 後端 config/ 給的題數上限（admin_demo 是 3）；null 代表照原本 28 題
+  int? _questionLimit;
+
+  void _setPlan(List<StagePlan> plan) {
+    final limit = _questionLimit;
+    _plan = limit == null ? plan : limitMarketSortPlan(plan, limit);
     _flattenedRules = _plan.expand((stage) => stage.rules).toList();
     _questionStageIndex = _plan
         .asMap()
@@ -22,10 +33,19 @@ class MarketSortGameController extends ChangeNotifier {
         )
         .toList();
     _stageBoundaryIndices = _computeStageBoundaryIndices();
-    _pickItemForCurrentQuestion();
   }
 
-  final Random _random;
+  /// 開局前套用後端給的題數（`MarketSortApiService.fetchTotalQuestions`）。
+  ///
+  /// 比目前題數少才會縮短（只出前 N 題），null、0 以下或不比 28 少都維持原樣。
+  /// 已經開始作答就不再改，避免玩到一半題數變了；之後 [reset] 重新開局也會沿用。
+  void applyQuestionLimit(int? limit) {
+    if (_currentIndex != 0 || _results.isNotEmpty) return;
+    if (limit == null || limit <= 0 || limit >= totalQuestionCount) return;
+    _questionLimit = limit;
+    _setPlan(_plan);
+    notifyListeners();
+  }
 
   late List<StagePlan> _plan;
   late List<GameRule> _flattenedRules;
@@ -153,16 +173,7 @@ class MarketSortGameController extends ChangeNotifier {
     _currentIndex = 0;
     _results.clear();
     _lockedTimer?.cancel();
-    _plan = buildMarketSort28QuestionPlan(_random);
-    _flattenedRules = _plan.expand((stage) => stage.rules).toList();
-    _questionStageIndex = _plan
-        .asMap()
-        .entries
-        .expand(
-          (entry) => List.filled(entry.value.questionCount, entry.key),
-        )
-        .toList();
-    _stageBoundaryIndices = _computeStageBoundaryIndices();
+    _setPlan(buildMarketSort28QuestionPlan(_random));
     _pickItemForCurrentQuestion();
   }
 

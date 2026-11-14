@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:light_memory/features/game/market_sort/controllers/market_sort_game_controller.dart';
 import 'package:light_memory/features/game/market_sort/models/trial_result.dart';
+import 'package:light_memory/features/game/market_sort/models/game_rule.dart';
+import 'package:light_memory/features/game/market_sort/models/market_sort_stage_plan.dart';
 
 void main() {
   test('28題的規則與階段邊界推進邏輯正確', () {
@@ -97,5 +99,51 @@ void main() {
 
     controller.resolveQuestion('dummy');
     expect(controller.results.first.trialType, TrialType.repeat);
+  });
+
+  group('Demo 模式：後端 config/ 給的題數', () {
+    test('給 3 題：只出前 3 題（生熟），第 3 題是最後一題', () {
+      final c = MarketSortGameController(random: Random(1));
+      c.applyQuestionLimit(3);
+      expect(c.totalQuestionCount, 3);
+      expect(c.currentRule, GameRule.freshness);
+      expect(c.isStageBoundary, isFalse);
+      c.moveToNextQuestion();
+      c.moveToNextQuestion();
+      expect(c.isLastQuestion, isTrue);
+      c.dispose();
+    });
+
+    test('重新開始（reset）沿用 3 題', () {
+      final c = MarketSortGameController(random: Random(1));
+      c.applyQuestionLimit(3);
+      c.reset();
+      expect(c.totalQuestionCount, 3);
+      c.dispose();
+    });
+
+    test('null、0、28 以上都維持 28 題', () {
+      for (final limit in [null, 0, -1, 28, 40]) {
+        final c = MarketSortGameController(random: Random(1));
+        c.applyQuestionLimit(limit);
+        expect(c.totalQuestionCount, 28, reason: 'limit=$limit');
+        c.dispose();
+      }
+    });
+
+    test('已經開始作答就不再改題數', () {
+      final c = MarketSortGameController(random: Random(1));
+      c.moveToNextQuestion();
+      c.applyQuestionLimit(3);
+      expect(c.totalQuestionCount, 28);
+      c.dispose();
+    });
+
+    test('limitMarketSortPlan 跨階段時最後一個階段只留到湊滿的題數', () {
+      final plan = limitMarketSortPlan(marketSort28QuestionPlan, 7);
+      expect(plan.map((s) => s.stageName), ['生熟', '種類']);
+      expect(plan.map((s) => s.questionCount), [5, 2]);
+      expect(plan.last.rules, hasLength(2));
+    });
   });
 }

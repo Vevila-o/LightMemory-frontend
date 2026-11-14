@@ -90,3 +90,26 @@ List<GameRule> _buildStage4Rules(Random random, int totalCount) {
   }
   return result;
 }
+/// 只保留前 [limit] 題（複賽 demo 用的 admin_demo 帳號，後端 config/ 會給 3 題）。
+///
+/// 依原本的階段順序切，不重新排題；最後一個保留的階段只留到剛好湊滿的題數。
+/// [limit] 大於等於整份題目數時原樣回傳。
+List<StagePlan> limitMarketSortPlan(List<StagePlan> plan, int limit) {
+  final result = <StagePlan>[];
+  var remaining = limit;
+  for (final stage in plan) {
+    if (remaining <= 0) break;
+    final count = min(stage.questionCount, remaining);
+    result.add(
+      count == stage.questionCount
+          ? stage
+          : StagePlan(
+              stageName: stage.stageName,
+              questionCount: count,
+              rules: stage.rules.sublist(0, count),
+            ),
+    );
+    remaining -= count;
+  }
+  return result;
+}

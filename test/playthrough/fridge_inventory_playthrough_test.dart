@@ -32,11 +32,13 @@ import '../support/test_home_screen.dart';
 const String kBase = '${ApiConstants.serverUrl}/api/games/fridge-check';
 
 class FakeFridgeBackend {
-  FakeFridgeBackend({this.startQ = 1});
+  FakeFridgeBackend({this.startQ = 1, this.total = 10});
 
   /// 開新 session 時從第幾題開始（用來快速跳到中等 / 困難 / 最後一題）
   int startQ;
-  final int total = 10;
+
+  /// 一場幾題（admin_demo 帳號後端給 3）
+  final int total;
 
   int q = 1;
   int score = 0;
@@ -477,6 +479,25 @@ void main() {
       expect(find.text('簡單難度玩法教學'), findsOneWidget);
       await wait(t, 1500);
       expect(find.text('簡單難度玩法教學'), findsNothing);
+    }, backend.client);
+  });
+
+  // Demo 模式（12 月複賽）：admin_demo 建立 session 回 total_questions = 3，第 3 題答完 is_completed: true
+  testWidgets('Demo 模式：後端給 3 題 → 進度顯示 x/3，第 3 題答完到結算頁', (t) async {
+    await setPhone(t);
+    final backend = FakeFridgeBackend(total: 3);
+    await http.runWithClient(() async {
+      await openGame(t);
+      expect(find.text('1/3'), findsOneWidget);
+      await answerCorrect(t, 'easy');
+      expect(find.text('2/3'), findsOneWidget);
+      await answerCorrect(t, 'easy');
+      expect(find.text('3/3'), findsOneWidget);
+      await answerCorrect(t, 'easy');
+      await wait(t, kNav);
+      await waitApi(t);
+      expect(find.byType(FridgeResultPage), findsOneWidget);
+      expect(backend.answerRequests, hasLength(3));
     }, backend.client);
   });
 

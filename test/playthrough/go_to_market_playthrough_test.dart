@@ -40,6 +40,7 @@ class FakeMarketBackend {
   bool hang = false; // 永遠不回應（觸發 4 秒 timeout）
   Duration answerDelay = Duration.zero; // answer API 延遲
   Map<String, dynamic>? roundDataOverride; // 覆寫 round 的 data
+  int totalQuestions = 20; // config/ 回的題數（admin_demo 是 3）
 
   final List<String> calls = [];
   final List<Map<String, dynamic>> answers = [];
@@ -100,7 +101,7 @@ class FakeMarketBackend {
       answers.add(body);
       final isTimeout = body['is_timeout'] == true;
       final correct = !isTimeout && body['answer_position'] == currentTarget;
-      final last = q >= 20;
+      final last = q >= totalQuestions;
       int earned = 0;
       String action;
       if (correct) {
@@ -163,8 +164,8 @@ class FakeMarketBackend {
     if (path.endsWith('/finish/')) {
       finishCalls++;
       return _ok({
-        'total_questions': 20,
-        'answered_count': 20,
+        'total_questions': totalQuestions,
+        'answered_count': totalQuestions,
         'correct_count': score ~/ 10,
         'timeout_count': 0,
         'accuracy': 0.5,
@@ -173,7 +174,9 @@ class FakeMarketBackend {
         'total_score': score,
       });
     }
-    if (path.endsWith('/config/')) return _ok({'total_questions': 20});
+    if (path.endsWith('/config/')) {
+      return _ok({'total_questions': totalQuestions});
+    }
     return http.Response('not found', 404);
   }
 }
@@ -444,14 +447,18 @@ Future<String> playQuestion(
   return 'next';
 }
 
-String questionCounter(WidgetTester tester) {
-  final t = find.textContaining(' / 20');
+String questionCounter(WidgetTester tester, {int total = 20}) {
+  final t = find.textContaining(' / $total');
   if (!has(t)) return '';
   return (tester.widget<Text>(t.first).data ?? '');
 }
 
 /// 逐步走完整個教學（含上一步、再看一次教學），最後按「開始挑戰 20 題」
-Future<void> walkTutorial(WidgetTester tester, {bool replayOnce = true}) async {
+Future<void> walkTutorial(
+  WidgetTester tester, {
+  bool replayOnce = true,
+  String startLabel = '開始挑戰 20 題',
+}) async {
   expect(find.text('來去菜市場'), findsOneWidget);
   var guard = 0;
   var didPrev = false;
@@ -465,7 +472,7 @@ Future<void> walkTutorial(WidgetTester tester, {bool replayOnce = true}) async {
         expect(find.text('簡單難度教學'), findsWidgets);
         continue;
       }
-      await tester.tap(find.text('開始挑戰 20 題'));
+      await tester.tap(find.text(startLabel));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       return;
@@ -552,6 +559,45 @@ void main() {
             .defaultBinaryMessenger
             .allMessagesHandler =
         null;
+  });
+
+  // Demo 模式（12 月複賽）：admin_demo 帳號後端 config/ 回 3 題，前端照後端題數
+  testWidgets('Demo 模式：config/ 給 3 題 → 教學按鈕顯示 3 題、答完第 3 題就結算', (tester) async {
+    addTearDown(tester.view.reset);
+    final backend = FakeMarketBackend()..totalQuestions = 3;
+    await runGame(tester, backend, (errors) async {
+      setSurface(tester, landscapePhone);
+      await tester.pumpWidget(simpleHost());
+      await openTutorialFromHost(tester);
+      await walkTutorial(tester, replayOnce: false, startLabel: '開始挑戰 3 題');
+      expect(find.byType(GoToMarketGamePage), findsOneWidget);
+
+      final log = <AnswerRecord>[];
+      String state = '';
+      for (var i = 0; i < 3; i++) {
+        await pumpUntil(tester, () => has(find.text(kExposeText)));
+        expect(questionCounter(tester, total: 3), '${i + 1} / 3');
+        state = await playQuestion(tester, ['c'], log);
+        if (i < 2) expect(state, isNot('result'), reason: '第 ${i + 1} 題就提早結算');
+      }
+      expect(state, 'result');
+      expect(backend.answers.length, 3);
+      expect(backend.finishCalls, 1);
+    });
+  });
+
+  testWidgets('config/ 失敗時維持 20 題（一般使用者不受影響）', (tester) async {
+    addTearDown(tester.view.reset);
+    final backend = FakeMarketBackend();
+    await runGame(tester, backend, (errors) async {
+      setSurface(tester, landscapePhone);
+      await tester.pumpWidget(simpleHost());
+      backend.failStatus = 500; // 教學頁、遊戲頁的 config/ 都失敗
+      await openTutorialFromHost(tester);
+      await walkTutorial(tester, replayOnce: false);
+      await pumpUntil(tester, () => has(find.text(kExposeText)));
+      expect(questionCounter(tester), '1 / 20');
+    }, allowErrors: true);
   });
 
   // 1. 正式路徑：遊戲首頁 → 教學 → 20 題（後端正常）→ 結算 → 再玩一次 → 暫停 → 退出

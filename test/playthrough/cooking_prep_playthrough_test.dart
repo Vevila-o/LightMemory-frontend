@@ -61,6 +61,9 @@ class FakeBackend {
   /// 送出這一輪答案時回 GAME_TIME_UP（模擬正式賽時間到）
   int? timeUpAtRound;
 
+  /// Demo 模式（admin_demo）：正式賽答完這一輪就回 action: finished，finish/ 的 total_score 固定 80
+  int? demoRounds;
+
   // 狀態
   int startCount = 0;
   int finishCount = 0;
@@ -256,6 +259,8 @@ class FakeBackend {
         int granted = 0;
         if (sessionPretest) {
           if (servedRound >= pretestRounds) action = 'finished';
+        } else if (demoRounds != null && servedRound >= demoRounds!) {
+          action = 'finished';
         } else if (ok && streak >= promoteStreak && kNextStage[stage] != null) {
           action = 'promoted';
           bridgeStage = stage;
@@ -292,7 +297,9 @@ class FakeBackend {
               : rts.reduce((a, b) => a + b) ~/ rts.length,
           'final_stage': stage,
           'total_bonus_seconds': bonusTotal,
-          'total_score': sessionPretest ? null : correct * 10,
+          'total_score': sessionPretest
+              ? null
+              : (demoRounds != null ? 80 : correct * 10),
         });
     }
     return http.Response('not found', 404);
@@ -532,6 +539,29 @@ void main() {
             .defaultBinaryMessenger
             .allMessagesHandler =
         null;
+  });
+
+  // Demo 模式（12 月複賽）：admin_demo 沒有熟悉場，第 3 回合答完後端回 action: finished
+  testWidgets('Demo 模式：第 3 回合後端回 finished → 呼叫 finish/ 一次並出現結算（總分 80）', (t) async {
+    final b = FakeBackend()..demoRounds = 3;
+    final h = await runGame(t, b, (h) async {
+      await h.passTutorial();
+      for (var n = 1; n <= 3; n++) {
+        final ok = await h.waitOptions(n);
+        h.check(ok, '第$n輪選項沒出現（servedRound=${b.servedRound}）');
+        if (!ok) return;
+        await h.answer(true);
+      }
+      h.check(
+        await h.until(() => h.has(find.text('本次分數')), maxMs: 5000),
+        '第 3 回合後沒有出現結算視窗',
+      );
+      h.check(b.servedRound == 3, '不應再出第 4 回合（servedRound=${b.servedRound}）');
+      h.check(b.finishCount == 1, 'finish/ 應呼叫一次（實際 ${b.finishCount}）');
+      h.check(h.has(find.text('總分 80')), '總分應為後端給的 80');
+    });
+    expect(h.failures, isEmpty, reason: h.failures.join('\n'));
+    expect(h.errors, isEmpty, reason: h.errors.join('\n'));
   });
 
   testWidgets('完整流程：首頁進入→教學→前測4輪→正式賽升兩階→時間到→彩蛋→結算→再玩一次→退出', (

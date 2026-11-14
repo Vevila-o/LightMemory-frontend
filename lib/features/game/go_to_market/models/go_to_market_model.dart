@@ -102,3 +102,17 @@ class MarketFinishResult {
     );
   }
 }
+
+/// 來去菜市場一場的預設題數（後端 config/ 打不到時用）
+const int kMarketRouteDefaultTotalQuestions = 20;
+
+/// 從 config/ 的 data 讀出一場幾題。
+///
+/// 一般帳號後端回 20；複賽 demo 用的 admin_demo 帳號回 3。
+/// 前端不判斷帳號，一律聽後端；config 失敗（null）、沒有這個欄位或不是正整數時用預設 20 題。
+int marketRouteTotalQuestions(dynamic config) {
+  final raw = config is Map ? config['total_questions'] : null;
+  final value = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+  if (value == null || value <= 0) return kMarketRouteDefaultTotalQuestions;
+  return value;
+}

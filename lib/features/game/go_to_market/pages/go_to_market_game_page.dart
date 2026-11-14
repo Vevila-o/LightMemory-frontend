@@ -23,7 +23,9 @@ class GoToMarketGamePage extends StatefulWidget {
 }
 
 class _GoToMarketGamePageState extends State with WidgetsBindingObserver {
-  final int totalQuestions = 20;
+  /// 一場幾題：開局時照後端 config/ 的 total_questions（一般帳號 20 題，
+  /// 複賽 demo 用的 admin_demo 帳號是 3 題）；打不到 config/ 就用預設 20 題。
+  int totalQuestions = kMarketRouteDefaultTotalQuestions;
   int currentQuestionNumber = 1;
   int attemptNumber = 1; // 當前題目的嘗試次數 (1~3)
 
@@ -201,7 +203,12 @@ class _GoToMarketGamePageState extends State with WidgetsBindingObserver {
 
   Future _startNewGameSession() async {
     _hasPromptedRelogin = false;
+    // config/（一場幾題）跟 start/ 同時打，後端沒回應時最多只等一次 4 秒逾時
+    final configFuture = GoToMarketService.fetchConfig();
     sessionId = await GoToMarketService.startGame();
+    final config = await configFuture;
+    if (!mounted) return;
+    setState(() => totalQuestions = marketRouteTotalQuestions(config));
     if (await _promptReloginIfUnauthorized()) return;
     await _loadRound();
   }

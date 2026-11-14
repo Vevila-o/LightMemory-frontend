@@ -753,6 +753,30 @@ void main() {
     });
   }
 
+  // Demo 模式（12 月複賽）：admin_demo 帳號後端建立 session 回 total_questions = 3，
+  // 第 3 題答完回 is_completed: true；前端照後端，不用自己判斷帳號
+  testWidgets('Demo 模式：後端給 3 題 → 顯示「第 x / 3 題」、第 3 題答完到結算頁', (tester) async {
+    setScreen(tester, const Size(360, 780));
+    final fake = FakeBackend(total: 3);
+    final log = await runGame(tester, fake, (log) async {
+      await enterGame(tester);
+      drain(tester, log);
+      await walkTutorial(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      for (var n = 1; n <= 3; n++) {
+        expect(find.text('第 $n / 3 題'), findsOneWidget);
+        await playQuestion(tester, fake, const QPlan(), log);
+      }
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(MarketShoppingResultPage), findsOneWidget, reason: '3 題後應到結算頁');
+      expect(find.text('${fake.points}'), findsWidgets, reason: '分數照後端回傳');
+      drain(tester, log);
+    });
+    expect(fake.violations, isEmpty, reason: fake.violations.join('\n'));
+    expect(log.errors.where((e) => !e.contains('overflowed')), isEmpty, reason: log.toString());
+  });
+
   testWidgets('已看過教學的旗標被忽略：每次開局都跳教學（設計如此，TutorialPreference 是死碼）', (tester) async {
     SharedPreferences.setMockInitialValues({'access_token': 'test-token', 'market_shopping_tutorial_seen': true});
     setScreen(tester, const Size(360, 780));

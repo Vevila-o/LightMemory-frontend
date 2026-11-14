@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../../core/network/auth_headers.dart';
 import '../../../../core/network/api_response.dart';
@@ -43,6 +44,26 @@ class MarketSortSubmitResult {
 
 class MarketSortApiService {
   static const String _submitUrl = '${ApiConstants.serverUrl}/api/games/market-sort/submit/';
+  static const String _configUrl = '${ApiConstants.serverUrl}/api/games/market-sort/config/';
+
+  /// 一場幾題：GET config/ 的 data.total_questions。
+  ///
+  /// 一般帳號後端回 28；複賽 demo 用的 admin_demo 帳號回 3。前端不判斷帳號，一律聽後端。
+  /// 打不到、逾時、沒有這個欄位或格式不對都回 null，遊戲照原本 28 題，一般使用者不受影響。
+  static Future<int?> fetchTotalQuestions() async {
+    try {
+      final response = await http
+          .get(Uri.parse(_configUrl), headers: await authHeaders())
+          .timeout(const Duration(seconds: 4));
+      return parseData(response, (data) {
+        final raw = data is Map ? data['total_questions'] : null;
+        return raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+      });
+    } catch (e) {
+      debugPrint('market-sort config 失敗，照原本 28 題：$e');
+      return null;
+    }
+  }
 
   static Future<MarketSortSubmitResult> submit({
     required String sessionId,

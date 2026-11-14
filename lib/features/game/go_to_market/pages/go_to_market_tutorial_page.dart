@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/go_to_market_model.dart';
 import '../services/audio_service.dart';
+import '../services/go_to_market_service.dart';
 import 'go_to_market_game_page.dart';
 
 class GoToMarketTutorialPage extends StatefulWidget {
@@ -28,9 +30,19 @@ class _GoToMarketTutorialPageState extends State<GoToMarketTutorialPage> {
   // dispose 就不會把方向改回直向（遊戲頁需要橫向）
   bool _leavingToGame = false;
 
+  /// 「開始挑戰 N 題」的 N：照後端 config/（admin_demo 是 3 題），打不到就是 20
+  int _totalQuestions = kMarketRouteDefaultTotalQuestions;
+
+  Future<void> _loadTotalQuestions() async {
+    final config = await GoToMarketService.fetchConfig();
+    if (!mounted) return;
+    setState(() => _totalQuestions = marketRouteTotalQuestions(config));
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadTotalQuestions();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -285,8 +297,8 @@ class _GoToMarketTutorialPageState extends State<GoToMarketTutorialPage> {
                 Navigator.of(dialogContext).pop();
                 _startGame();
               },
-              child: const Text(
-                '開始挑戰 20 題',
+              child: Text(
+                '開始挑戰 $_totalQuestions 題',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,

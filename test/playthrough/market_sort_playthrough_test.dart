@@ -41,6 +41,7 @@ import 'package:light_memory/screens/market_sort_result_screen.dart';
 // ───────────────────────── 假資料與共用工具 ─────────────────────────
 
 const _submitUrl = '${ApiConstants.serverUrl}/api/games/market-sort/submit/';
+const _configUrl = '${ApiConstants.serverUrl}/api/games/market-sort/config/';
 
 String _okBody({
   int current = 82,
@@ -67,7 +68,21 @@ class _Backend {
   SubmitHandler onSubmit = (_) async =>
       http.Response(_okBody(), 200, headers: _jsonHeaders);
 
+  /// config/ 回的題數；null 時 config/ 跟其他網址一樣回 404（前端要照原本 28 題）
+  int? configTotal;
+
   MockClient client() => MockClient((req) async {
+    if (req.url.toString() == _configUrl && configTotal != null) {
+      return http.Response(
+        jsonEncode({
+          'success': true,
+          'data': {'total_questions': configTotal},
+          'error': null,
+        }),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
     if (req.url.toString() == _submitUrl) {
       submits.add(req);
       return onSubmit(req);
@@ -430,6 +445,61 @@ void main() {
         expect(find.byType(MarketSortGameScreen), findsNothing);
         expect(find.byType(TestHomeScreen), findsOneWidget);
         expect(backend.submits, hasLength(1), reason: '中途退出不應再送一次完整成績');
+      }, backend.client);
+    } finally {
+      sink.detach();
+    }
+    expect(sink.summaries, isEmpty, reason: sink.summaries.join('\n'));
+  });
+
+  // ───────────────────────── Demo 模式（12 月複賽）─────────────────────────
+
+  testWidgets('Demo 模式：config/ 給 3 題 → 只出前 3 題、送出 3 題 → 結算頁 80 分；重新開始也維持 3 題', (tester) async {
+    _setSurface(tester, const Size(360, 780));
+    final backend = _Backend()
+      ..configTotal = 3
+      ..onSubmit = (_) async => http.Response(
+        _okBody(current: 80, highest: 80, recent: const [], tier: 'good'),
+        201,
+        headers: _jsonHeaders,
+      );
+    final sink = _ErrorSink()..attach();
+    try {
+      await http.runWithClient(() async {
+        await _pumpApp(tester);
+        await _enterFromHome(tester);
+        await _finishCountdown(tester);
+        expect(_progressText(tester), '1/3');
+
+        // 玩一題後按「重新開始」：新的一局一樣只有 3 題
+        await _answerCurrent(tester, correct: true);
+        expect(_progressText(tester), '2/3');
+        await tester.pump(const Duration(milliseconds: 2100));
+        await tester.tap(find.text('選單'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('重新開始'));
+        await tester.pump();
+        await _finishCountdown(tester);
+        expect(_progressText(tester), '1/3');
+
+        final answered = <_Answered>[];
+        for (var q = 1; q <= 3; q++) {
+          expect(_progressText(tester), '$q/3');
+          answered.add(await _answerCurrent(tester, correct: q != 2));
+        }
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 800));
+
+        expect(backend.submits, hasLength(1));
+        final body = jsonDecode(backend.submits.single.body) as Map<String, dynamic>;
+        expect(body['is_complete'], isTrue);
+        final qs = backend.questionsOf(0);
+        expect(qs.map((q) => q['question_index']), [1, 2, 3]);
+        expect(answered.every((a) => a.rule == GameRule.freshness), isTrue,
+            reason: '照原本順序取前 3 題（第一階段生熟）');
+        expect(find.byType(MarketSortResultScreen), findsOneWidget);
+        expect(find.text('80'), findsWidgets);
       }, backend.client);
     } finally {
       sink.detach();

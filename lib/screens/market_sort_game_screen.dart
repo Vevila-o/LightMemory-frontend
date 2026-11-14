@@ -40,10 +40,14 @@ class _MarketSortGameScreenState extends State<MarketSortGameScreen> {
   bool _isIdle = false;
   Timer? _idleTimer;
 
+  /// 開局就去問後端一場幾題（admin_demo 是 3 題），倒數 3、2、1 的同時在跑
+  late final Future<int?> _totalQuestionsFuture;
+
   @override
   void initState() {
     super.initState();
     _controller = MarketSortGameController();
+    _totalQuestionsFuture = MarketSortApiService.fetchTotalQuestions();
     _startCountdown();
   }
 
@@ -60,7 +64,10 @@ class _MarketSortGameScreenState extends State<MarketSortGameScreen> {
       setState(() => _countdownNumber = n);
       await Future.delayed(const Duration(seconds: 1));
     }
+    // 第一題開始前套用題數；玩到一半暫停再繼續時 controller 會忽略
+    final totalQuestions = await _totalQuestionsFuture;
     if (!mounted) return;
+    _controller.applyQuestionLimit(totalQuestions);
     setState(() => _countdownNumber = null);
     _startCurrentQuestion();
   }
