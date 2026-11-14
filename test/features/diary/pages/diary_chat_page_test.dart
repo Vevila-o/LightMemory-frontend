@@ -3,6 +3,7 @@
 // record_platform_interface 是 record 的相依套件，測試裡用它換掉真的麥克風
 // ignore: depend_on_referenced_packages
 import 'package:record_platform_interface/record_platform_interface.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -72,15 +73,26 @@ class _FakeRecordPlatform extends RecordPlatform
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-DiaryModel _diary({String photoUrl = 'https://example.com/photo.jpg'}) =>
-    DiaryModel.fromJson({
-      'diary_id': 1,
-      'date': '2026-11-14',
-      'created_at': '2026-11-14T10:00:00+08:00',
-      'status': 'in_progress',
-      'photo_url': photoUrl,
-      'first_question': _question,
-    });
+DiaryModel _diary({
+  String photoUrl = 'https://example.com/photo.jpg',
+  String question = _question,
+}) => DiaryModel.fromJson({
+  'diary_id': 1,
+  'date': '2026-11-14',
+  'created_at': '2026-11-14T10:00:00+08:00',
+  'status': 'in_progress',
+  'photo_url': photoUrl,
+  'first_question': question,
+});
+
+/// Android（捲到頭會停住）和 iPhone（捲到頭會回彈）的捲動方式不同，兩種都要測
+const _androidAndIos = TargetPlatformVariant(<TargetPlatform>{
+  TargetPlatform.android,
+  TargetPlatform.iOS,
+});
+
+/// 很長的問題，讓對話列表可以捲動（模擬聊了好幾輪）
+final _longQuestion = List.filled(40, '這張照片是在哪裡拍的？').join();
 
 /// AI 問題出現在疊層上（對話列表裡本來就有一份）
 Finder get _overlayQuestion => find.text(_question);
@@ -137,37 +149,94 @@ void main() {
     expect(find.bySemanticsLabel('放大照片'), findsNothing);
   });
 
-  testWidgets('往上滑對話氣泡：照片縮成縮圖，點縮圖放回原本大小', (tester) async {
+  testWidgets('對話還很短時：往下拉縮小，往上推展開，點縮圖也能展開', (tester) async {
     await pumpPage(tester);
 
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    // 往下拉（想看前面的對話）→ 照片縮成縮圖
+    await tester.drag(find.byType(ListView), const Offset(0, 120));
     await tester.pumpAndSettle();
-
     expect(find.text(_subtitle), findsNothing);
     expect(find.bySemanticsLabel('放大照片'), findsOneWidget);
 
+    // 往上推（回到最新）→ 展開
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsOneWidget);
+
+    // 再縮一次，點縮圖展開
+    await tester.drag(find.byType(ListView), const Offset(0, 120));
+    await tester.pumpAndSettle();
     await tester.tap(find.bySemanticsLabel('放大照片'));
     await tester.pumpAndSettle();
-
     expect(find.text(_subtitle), findsOneWidget);
-  });
+  }, variant: _androidAndIos);
 
-  testWidgets('在最上面往下拉：照片展開', (tester) async {
-    await pumpPage(tester);
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+  testWidgets('對話很長時：往上捲看前面的對話縮小，捲回最底部展開', (tester) async {
+    await pumpPage(tester, diary: _diary(question: _longQuestion));
+    final list = find.byType(ListView);
+
+    // 先捲到最底部（最新的問題），照片維持展開
+    await tester.drag(list, const Offset(0, -3000));
+    await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsOneWidget);
+
+    // 往上捲看前面 → 縮小
+    await tester.drag(list, const Offset(0, 200));
     await tester.pumpAndSettle();
     expect(find.text(_subtitle), findsNothing);
 
-    await tester.drag(find.byType(ListView), const Offset(0, 120));
+    // 捲到一半往下（還沒到底）→ 維持縮小
+    await tester.drag(list, const Offset(0, -50));
     await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsNothing);
 
+    // 捲回最底部 → 展開
+    await tester.drag(list, const Offset(0, -3000));
+    await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsOneWidget);
+  }, variant: _androidAndIos);
+
+  testWidgets('往下快速滑回最底部（慣性）也會展開', (tester) async {
+    await pumpPage(tester, diary: _diary(question: _longQuestion));
+    final list = find.byType(ListView);
+
+    await tester.drag(list, const Offset(0, -3000));
+    await tester.pumpAndSettle();
+    await tester.drag(list, const Offset(0, 300));
+    await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsNothing);
+
+    // 快速往上一甩，靠慣性衝回最底部
+    await tester.fling(list, const Offset(0, -200), 3000);
+    await tester.pumpAndSettle();
+    expect(find.text(_subtitle), findsOneWidget);
+  }, variant: _androidAndIos);
+
+  testWidgets('網頁版用滑鼠滾輪捲動也會縮小、展開', (tester) async {
+    await pumpPage(tester, diary: _diary(question: _longQuestion));
+    final center = tester.getCenter(find.byType(ListView));
+
+    Future<void> wheel(double dy) async {
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      pointer.hover(center);
+      await tester.sendEventToBinding(pointer.scroll(Offset(0, dy)));
+      await tester.pumpAndSettle();
+    }
+
+    await wheel(3000); // 滾到最底部
+    expect(find.text(_subtitle), findsOneWidget);
+
+    await wheel(-200); // 往上滾看前面
+    expect(find.text(_subtitle), findsNothing);
+
+    await wheel(3000); // 滾回最底部
     expect(find.text(_subtitle), findsOneWidget);
   });
 
-  testWidgets('沒有照片時往上滑不會縮', (tester) async {
+  testWidgets('沒有照片時捲動不會縮', (tester) async {
     await pumpPage(tester, diary: _diary(photoUrl: ''));
 
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.drag(find.byType(ListView), const Offset(0, 120));
     await tester.pumpAndSettle();
 
     expect(find.text(_subtitle), findsOneWidget);
