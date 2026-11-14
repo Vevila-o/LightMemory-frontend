@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:image_picker/image_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../models/diary_model.dart';
@@ -62,6 +63,13 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
   /// 使用者往上滑對話氣泡時，照片縮成標題旁的小縮圖，讓對話區變大
   bool _photoCollapsed = false;
 
+  /// 對話區上一次的高度：照片縮放、下方按鈕出現消失時對話區高度會變，
+  /// 用來把捲動位置補回去
+  double? _lastChatHeight;
+
+  /// iPhone 放手後從邊界彈回來的那段捲動不算使用者捲的，等這次捲動結束再恢復
+  bool _ignoringBounce = false;
+
   /// 聚焦模式的黑色 50% 疊層＋背景模糊
   static const Color _focusOverlayColor = Color(0x80000000);
   static const double _focusBlurSigma = 8;
@@ -90,29 +98,80 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
     setState(() => _photoCollapsed = collapsed);
   }
 
-  /// 手指往上滑對話氣泡 → 照片縮小；在最上面再往下拉 → 照片展開。
-  /// 只看使用者自己拖曳的捲動（dragDetails 不是 null），程式自動捲到底不算
+  /// 往回看前面的對話（往上捲）→ 照片縮小，對話區變大；
+  /// 捲回最底部（最新的問題）→ 照片展開；點縮圖也能展開。
+  ///
+  /// 只看使用者自己的捲動：手指拖曳、放手後的慣性、網頁版的滑鼠滾輪／觸控板。
+  /// 新訊息出現時程式自動捲到底不算，照片維持使用者原本的大小
   bool _onChatScroll(ScrollNotification notification) {
+    if (notification is ScrollEndNotification) {
+      _ignoringBounce = false;
+      return false;
+    }
     if (_isFocusMode) return false;
     if (notification is ScrollUpdateNotification &&
-        notification.dragDetails != null) {
+        notification.dragDetails == null &&
+        notification.metrics.outOfRange) {
+      // 放手後的慣性往下衝過最底部 → 算是回到最新，照片展開
+      final metrics = notification.metrics;
+      if ((notification.scrollDelta ?? 0) > 0 &&
+          metrics.pixels >= metrics.maxScrollExtent &&
+          !_ignoringBounce) {
+        _setPhotoCollapsed(false);
+      }
+      // 超出邊界之後是回彈，到停下來之前都不處理
+      _ignoringBounce = true;
+    }
+    if (_ignoringBounce) return false;
+    if (notification is ScrollUpdateNotification &&
+        _isUserScroll(notification)) {
       final delta = notification.scrollDelta ?? 0;
-      if (delta > 0) {
+      if (delta < 0) {
         _setPhotoCollapsed(true);
-      } else if (delta < 0 &&
-          notification.metrics.pixels <= notification.metrics.minScrollExtent) {
+      } else if (delta > 0 && notification.metrics.extentAfter < 1) {
         _setPhotoCollapsed(false);
       }
     } else if (notification is OverscrollNotification &&
         notification.dragDetails != null) {
-      // 對話還很短、列表不能捲時，Android 只會送 overscroll
-      if (notification.overscroll > 0) {
+      // 對話還很短、列表不能捲時，Android 只會送 overscroll：
+      // 往下拉（想看前面）縮小，往上推（回到最新）展開
+      if (notification.overscroll < 0) {
         _setPhotoCollapsed(true);
-      } else if (notification.overscroll < 0) {
+      } else if (notification.overscroll > 0) {
         _setPhotoCollapsed(false);
       }
     }
     return false;
+  }
+
+  /// 對話區變高或變矮時（照片縮放、下方按鈕出現消失），維持「離最底部的距離」不變，
+  /// 跟一般聊天 App 一樣以最新的訊息為準：
+  /// - 往上看舊訊息 → 照片縮小、對話區變高，畫面上的氣泡不會跳，也不會因為
+  ///   突然「到底了」又把照片展開（一縮一放）
+  /// - 在最底部時照片展開 → 對話區變矮，最新的問題仍然留在畫面最下面
+  /// 在版面配置當下用 correctBy 修正，不會打斷手指正在拖曳的捲動
+  void _keepDistanceFromBottom(double height) {
+    final last = _lastChatHeight;
+    _lastChatHeight = height;
+    if (last == null || last == height || !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    // 回彈中（超出邊界）不補，讓它自己彈回去
+    if (!position.hasPixels || position.outOfRange) return;
+    final grow = height - last;
+    final target = (position.pixels - grow).clamp(0.0, double.infinity);
+    if (target != position.pixels) position.correctBy(target - position.pixels);
+  }
+
+  /// 這次捲動是不是使用者自己捲的：
+  /// 拖曳時有 dragDetails；滑鼠滾輪和放手後的慣性沒有 dragDetails，
+  /// 但捲動方向（userScrollDirection）不是 idle。程式的 animateTo 不會改方向
+  bool _isUserScroll(ScrollUpdateNotification notification) {
+    if (notification.dragDetails != null) return true;
+    if (!_scrollController.hasClients) return false;
+    return _scrollController.position.userScrollDirection !=
+        ScrollDirection.idle;
   }
 
   @override
@@ -359,40 +418,47 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
                             child: _buildHeader(titleColor, subtitleColor),
                           ),
                           Expanded(
-                            child: NotificationListener<ScrollNotification>(
-                              onNotification: _onChatScroll,
-                              child: ListView.builder(
-                                controller: _scrollController,
-                                // 對話還很短時也要能拖，才收得到「往上滑」
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                itemCount:
-                                    _messages.length + (_isTyping ? 1 : 0),
-                                itemBuilder: (context, index) {
-                                  if (_isTyping && index == _messages.length) {
-                                    return const ChatBubble(
-                                      isUser: false,
-                                      text: '',
-                                      isTyping: true,
-                                    );
-                                  }
-                                  final message = _messages[index];
-                                  return ChatBubble(
-                                    isUser: message.isUser,
-                                    text: message.text,
-                                    isPlaying: _playingIndex == index,
-                                    onPlayTap: message.audioUrl == null
-                                        ? null
-                                        : () => _togglePlayAudio(
-                                            index,
-                                            message.audioUrl!,
-                                          ),
-                                  );
-                                },
-                              ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                _keepDistanceFromBottom(constraints.maxHeight);
+                                return NotificationListener<ScrollNotification>(
+                                  onNotification: _onChatScroll,
+                                  child: ListView.builder(
+                                    controller: _scrollController,
+                                    // 對話還很短時也要能拖，才收得到「往上滑」
+                                    physics:
+                                        const AlwaysScrollableScrollPhysics(),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    itemCount:
+                                        _messages.length + (_isTyping ? 1 : 0),
+                                    itemBuilder: (context, index) {
+                                      if (_isTyping &&
+                                          index == _messages.length) {
+                                        return const ChatBubble(
+                                          isUser: false,
+                                          text: '',
+                                          isTyping: true,
+                                        );
+                                      }
+                                      final message = _messages[index];
+                                      return ChatBubble(
+                                        isUser: message.isUser,
+                                        text: message.text,
+                                        isPlaying: _playingIndex == index,
+                                        onPlayTap: message.audioUrl == null
+                                            ? null
+                                            : () => _togglePlayAudio(
+                                                index,
+                                                message.audioUrl!,
+                                              ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ],
