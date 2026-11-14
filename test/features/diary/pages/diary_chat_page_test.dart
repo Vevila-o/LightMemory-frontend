@@ -94,6 +94,15 @@ double _overlayOpacity(WidgetTester tester) {
       .opacity;
 }
 
+/// 標題列上的聚焦疊層透明度
+double _topOverlayOpacity(WidgetTester tester) {
+  return tester
+      .widget<AnimatedOpacity>(
+        find.byKey(const ValueKey('diary-focus-overlay-top')),
+      )
+      .opacity;
+}
+
 /// 錄音中計時器、波形每 150ms 更新一次，用固定時間的 pump 讓動畫跑完
 Future<void> _pumpWhileRecording(WidgetTester tester) async {
   for (var i = 0; i < 4; i++) {
@@ -213,6 +222,53 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(_overlayOpacity(tester), 1);
     // 收尾：暫停錄音，計時器才不會留到測試結束
+    await tester.tap(find.byIcon(Icons.pause));
+    await _pumpWhileRecording(tester);
+  });
+
+  testWidgets('聚焦模式蓋滿整個畫面：標題列、對話區都模糊變暗，錄音區黑底撐滿寬度', (tester) async {
+    // 寬螢幕（網頁版）也要整個寬度都變暗
+    tester.view.physicalSize = const Size(1000 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    // 從別頁推進來，返回鍵才有地方可以回去
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(navigatorKey: navigatorKey, home: const SizedBox()),
+    );
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => DiaryChatPage(initialDiary: _diary()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(_topOverlayOpacity(tester), 0);
+
+    await tester.tap(find.byIcon(Icons.mic));
+    await _pumpWhileRecording(tester);
+
+    // 標題列＋對話區各一層模糊
+    expect(find.byType(BackdropFilter), findsNWidgets(2));
+    expect(_topOverlayOpacity(tester), 1);
+
+    // 錄音區的黑色底撐滿整個寬度（不是只有按鈕那一塊）
+    final recordArea = find
+        .ancestor(
+          of: find.text('點擊暫停，或按完成送出'),
+          matching: find.byType(AnimatedContainer),
+        )
+        .first;
+    expect(tester.getSize(recordArea).width, 1000);
+    // 而且一路到螢幕最下面
+    expect(tester.getBottomLeft(recordArea).dy, 844);
+
+    // 聚焦時標題列的返回鍵被疊層擋住，不會不小心離開
+    await tester.tap(find.byIcon(Icons.arrow_back), warnIfMissed: false);
+    await _pumpWhileRecording(tester);
+    expect(find.byType(DiaryChatPage), findsOneWidget);
+
     await tester.tap(find.byIcon(Icons.pause));
     await _pumpWhileRecording(tester);
   });

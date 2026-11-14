@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -61,8 +62,9 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
   /// 使用者往上滑對話氣泡時，照片縮成標題旁的小縮圖，讓對話區變大
   bool _photoCollapsed = false;
 
-  /// 聚焦模式的黑色 50% 疊層
+  /// 聚焦模式的黑色 50% 疊層＋背景模糊
   static const Color _focusOverlayColor = Color(0x80000000);
+  static const double _focusBlurSigma = 8;
   static const Duration _focusAnimation = Duration(milliseconds: 200);
 
   int get _diaryId => widget.initialDiary.diaryId;
@@ -327,8 +329,24 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
 
         return Scaffold(
           backgroundColor: bgColor,
-          appBar: const TopBar(title: '聲影日記', showBackButton: true),
+          // 聚焦模式時標題列也一起蓋上模糊黑色疊層，整個畫面只剩照片、問題和錄音鈕
+          appBar: PreferredSize(
+            preferredSize: const Size.fromHeight(kToolbarHeight),
+            child: Stack(
+              children: [
+                const TopBar(title: '聲影日記', showBackButton: true),
+                Positioned.fill(
+                  child: _buildFocusLayer(
+                    key: const ValueKey('diary-focus-overlay-top'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 底部不用 SafeArea：錄音區自己補上手機底部的安全距離，
+          // 聚焦模式的黑色疊層才能一路蓋到螢幕最下面
           body: SafeArea(
+            bottom: false,
             child: Column(
               children: [
                 Expanded(
@@ -379,36 +397,29 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
                           ),
                         ],
                       ),
-                      // 聚焦模式疊層：只蓋對話區，錄音按鈕在下方另一區
+                      // 聚焦模式疊層：模糊＋黑色蓋住對話區，照片和問題置中
                       Positioned.fill(
-                        child: IgnorePointer(
-                          ignoring: !_isFocusMode,
-                          child: ExcludeSemantics(
-                            excluding: !_isFocusMode,
-                            child: AnimatedOpacity(
-                              key: const ValueKey('diary-focus-overlay'),
-                              opacity: _isFocusMode ? 1 : 0,
-                              duration: _focusAnimation,
-                              // 不在聚焦時不建內容，避免問題文字重複出現
-                              child: _isFocusMode
-                                  ? _buildFocusOverlay()
-                                  : const SizedBox.expand(),
-                            ),
-                          ),
+                        child: _buildFocusLayer(
+                          key: const ValueKey('diary-focus-overlay'),
+                          // 不在聚焦時不建內容，避免問題文字重複出現
+                          child: _isFocusMode ? _buildFocusContent() : null,
                         ),
                       ),
                     ],
                   ),
                 ),
-                // 錄音區：聚焦模式時底色也變成同樣的黑色疊層，
+                // 錄音區：聚焦模式時底色也變成同樣的黑色疊層（整個寬度、蓋到螢幕底），
                 // 看起來整個畫面一起變暗，錄音按鈕維持同一個元件（錄音不中斷）
                 AnimatedContainer(
                   duration: _focusAnimation,
+                  width: double.infinity,
                   color: _isFocusMode ? _focusOverlayColor : Colors.transparent,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      16,
+                      20,
+                      16 + MediaQuery.paddingOf(context).bottom,
                     ),
                     child: Column(
                       children: [
@@ -585,46 +596,73 @@ class _DiaryChatPageState extends State<DiaryChatPage> {
     );
   }
 
-  /// 聚焦模式：黑色 50% 疊層上，照片（完整顯示、不裁切）和目前的 AI 問題置中。
+  /// 聚焦模式的疊層：背景模糊＋黑色 50%，淡入淡出。
+  /// 聚焦時會擋住底下的點擊（標題列的返回鍵、對話氣泡），只剩錄音鈕能按
+  Widget _buildFocusLayer({required Key key, Widget? child}) {
+    return IgnorePointer(
+      ignoring: !_isFocusMode,
+      child: ExcludeSemantics(
+        excluding: !_isFocusMode,
+        child: AnimatedOpacity(
+          key: key,
+          opacity: _isFocusMode ? 1 : 0,
+          duration: _focusAnimation,
+          child: _isFocusMode
+              ? ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(
+                      sigmaX: _focusBlurSigma,
+                      sigmaY: _focusBlurSigma,
+                    ),
+                    child: ColoredBox(
+                      color: _focusOverlayColor,
+                      child: child ?? const SizedBox.expand(),
+                    ),
+                  ),
+                )
+              : const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  /// 聚焦模式疊層上的內容：照片（完整顯示、不裁切）和目前的 AI 問題置中。
   /// 照片最高佔可用高度的一半多一點，橫向或小螢幕時自動縮小
-  Widget _buildFocusOverlay() {
-    return ColoredBox(
-      color: _focusOverlayColor,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final question = _currentQuestion;
-          return Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_hasPhoto) ...[
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth * 0.85,
-                        maxHeight: constraints.maxHeight * 0.55,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.network(
-                          _photoUrl!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const SizedBox.shrink(),
-                        ),
+  Widget _buildFocusContent() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final question = _currentQuestion;
+        return Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_hasPhoto) ...[
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: constraints.maxWidth * 0.85,
+                      maxHeight: constraints.maxHeight * 0.55,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.network(
+                        _photoUrl!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const SizedBox.shrink(),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                  if (question.isNotEmpty)
-                    ChatBubble(isUser: false, text: question),
+                  ),
+                  const SizedBox(height: 16),
                 ],
-              ),
+                if (question.isNotEmpty)
+                  ChatBubble(isUser: false, text: question),
+              ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }
