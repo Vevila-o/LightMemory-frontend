@@ -5,6 +5,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
+import 'local_notifications.dart';
 
 /// 每日提醒的設定：開關與時間（只存在這支手機，不存後端）
 class ReminderSettings {
@@ -162,8 +163,7 @@ class LocalNotificationScheduler implements ReminderScheduler {
   static const String _channelId = 'daily_reminder';
   static const String _channelName = '每日提醒';
 
-  final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
+  FlutterLocalNotificationsPlugin get _plugin => LocalNotifications.plugin;
   bool _initialized = false;
 
   @override
@@ -178,43 +178,14 @@ class LocalNotificationScheduler implements ReminderScheduler {
       debugPrint('[ReminderService] 取得時區失敗，改用 Asia/Taipei：$e');
       tz.setLocalLocation(tz.getLocation('Asia/Taipei'));
     }
-    await _plugin.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        // 權限等使用者在設定頁打開提醒時才要，不要一打開 App 就跳詢問
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      ),
-    );
+    await LocalNotifications.ensureInitialized();
     _initialized = true;
   }
 
   @override
   Future<bool> requestPermission() async {
     await init();
-    final android = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    if (android != null) {
-      return await android.requestNotificationsPermission() ?? false;
-    }
-    final ios = _plugin
-        .resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin
-        >();
-    if (ios != null) {
-      return await ios.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          ) ??
-          false;
-    }
-    return false;
+    return LocalNotifications.requestPermission();
   }
 
   @override

@@ -11,7 +11,11 @@ import 'features/diary/pages/diary_chat_page.dart';
 import 'features/diary/pages/diary_loading_page.dart';
 import 'core/constants/route_constants.dart';
 import 'core/navigation/app_route_observer.dart';
+import 'core/navigation/app_navigator.dart';
+import 'core/services/local_notifications.dart';
+import 'core/services/new_notification_alerter.dart';
 import 'core/services/reminder_service.dart';
+import 'screens/notification_screen.dart';
 import 'screens/market_sort_game_screen.dart';
 import 'screens/main_screen.dart';
 import 'features/diary/pages/diary_finish_page.dart';
@@ -29,7 +33,22 @@ void main() async {
   await initializeDateFormatting('zh_TW');
   // 每日提醒：依上次的設定重新排程（網頁版不做；失敗不影響啟動，所以不等它）
   unawaited(ReminderService.init());
+  // 新通知提醒：定時查後端有沒有新通知（留言、語音加油），有就跳手機通知
+  if (NewNotificationAlerter.isSupported) {
+    LocalNotifications.onTap = _openFromNotification;
+    NewNotificationAlerter.instance.start();
+  }
   runApp(const MyApp());
+}
+
+/// App 開著或在背景時點了「新通知」的手機通知：打開通知頁。
+/// 每日提醒的通知沒有 payload，只打開 App；App 原本完全關掉時也只打開 App
+/// （啟動流程會換掉最上層的頁面），首頁鈴鐺會顯示未讀。
+void _openFromNotification(String? payload) {
+  if (payload != NewNotificationAlerter.payload) return;
+  appNavigatorKey.currentState?.push(
+    MaterialPageRoute(builder: (_) => const NotificationScreen()),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -39,6 +58,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '憶智防線',
+      navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
       home: const AuthGate(),
       navigatorObservers: [appRouteObserver],
